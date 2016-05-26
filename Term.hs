@@ -75,7 +75,7 @@ poor_bias, good_bias :: V.Vector Double
 -- will need to produce a list.
 
 poor_bias = V.fromList [1,1,1,1,1,1]
-good_bias = V.fromList [3,1,1,2,2,4]
+good_bias = V.fromList [3,1,1,1,2,4]
 
 
 generateTerm :: MWC.GenIO -> IO Term
