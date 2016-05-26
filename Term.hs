@@ -8,6 +8,17 @@ import qualified Data.Vector                     as V
 import           Control.Monad
 import           Data.Maybe
 
+-- This program generates a program which when evaluated
+-- returns of list of length 5.
+
+-- Right now, this program is very brittle and involves
+-- no learning. The objective function is very strict (0/1)
+-- and we do not take into account context or types when
+-- generating sub-expressions.
+
+-- Note: No code yet exists to cut off programs which are
+-- likely to diverge.
+
 type Name = String
 type Env  = HashMap String Val
 
@@ -54,6 +65,15 @@ eval (Lit  a)      _   = I a
 eval Nil           _   = L []
 eval (Cons x xs)   env = cons (eval x env) (eval xs env)
 
+poor_bias, good_bias :: V.Vector Double
+
+-- poor_bias and good_bias encode at which frequency
+-- we should generate different terms. poor_bias
+-- encodes a uniform bias, which is likely to
+-- generate many useless programs. good_bias encodes
+-- a bias that prefers Cons which is likely what we
+-- will need to produce a list.
+
 poor_bias = V.fromList [1,1,1,1,1,1]
 good_bias = V.fromList [3,1,1,2,2,4]
 
@@ -62,11 +82,11 @@ generateTerm :: MWC.GenIO -> IO Term
 generateTerm g = do
     categorical good_bias g >>= go
   -- where MCTS logic goes
-  where go 0 = return (Var "x")
+  where go 0 = Var     <$> pure "x"
         go 1 = Lam "x" <$> generateTerm g
         go 2 = App     <$> generateTerm g
                        <*> generateTerm g
-        go 3 = return (Lit 3)
+        go 3 = Lit     <$> pure 3
         go 4 = return Nil
         go 5 = Cons    <$> generateTerm g
                        <*> generateTerm g
@@ -88,5 +108,5 @@ getPassingTerm o g = do
 main :: IO ()
 main = do
     g <- createSystemRandom
-    x <- replicateM 40 (getPassingTerm objective g)
+    x <- replicateM 5 (getPassingTerm objective g)
     mapM_ print x
