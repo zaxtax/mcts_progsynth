@@ -6,6 +6,8 @@ import           System.Random.MWC               as MWC
 import           System.Random.MWC.Distributions as MD
 import qualified Data.Vector                     as V
 import           Control.Monad
+import           Control.Monad.State.Strict
+import           Control.Monad.Trans.Maybe
 import           Data.Maybe
 
 -- This program generates a program which when evaluated
@@ -77,12 +79,22 @@ poor_bias, good_bias :: V.Vector Double
 poor_bias = V.fromList [1,1,1,1,1,1]
 good_bias = V.fromList [3,1,1,2,2,4]
 
+type Fuel   = Integer
+type Fueled = StateT Fuel (MaybeT IO)
 
-generateTerm :: MWC.GenIO -> IO Term
+runFueled :: Fueled a -> Fuel -> IO (Maybe (a, Fuel))
+runFueled s fuel = runMaybeT (runStateT s fuel)
+
+generateTerm :: MWC.GenIO -> Fueled Term
 generateTerm g = do
-    categorical good_bias g >>= go
+    modify (subtract 1)
+    fuel <- get
+    case fuel > 0 of
+      True  -> categorical good_bias g >>= go
+      False -> mzero
   -- where MCTS logic goes
-  where go 0 = Var     <$> pure "x"
+  where go :: Int -> Fueled Term
+        go 0 = Var     <$> pure "x"
         go 1 = Lam "x" <$> generateTerm g
         go 2 = App     <$> generateTerm g
                        <*> generateTerm g
@@ -91,22 +103,28 @@ generateTerm g = do
         go 5 = Cons    <$> generateTerm g
                        <*> generateTerm g
               
-objective :: Val -> Bool
-objective (L xs) = length xs == 5
-objective _      = False
+void_bool True  = Just ()
+void_bool False = Nothing
 
-getPassingTerm :: (Val -> Bool)
+objective :: Val -> Maybe ()
+objective (L xs) = void_bool $ length xs == 5
+objective _      = Nothing
+
+getPassingTerm :: (Val -> Maybe ())
                -> MWC.GenIO
                -> IO Term
 getPassingTerm o g = do
-  x <- generateTerm g
-  case o (eval x empty) of
-    True  -> return x
-    False -> getPassingTerm o g
-
+  x <- runFueled (generateTerm g) 2000
+  case go x of
+    Just x' -> return x'
+    Nothing -> getPassingTerm o g
+ where go x = do
+         (term, _) <- x
+         o (eval term empty)
+         return term
 
 main :: IO ()
 main = do
     g <- createSystemRandom
-    x <- replicateM 5 (getPassingTerm objective g)
+    x <- replicateM 10 (getPassingTerm objective g)
     mapM_ print x
