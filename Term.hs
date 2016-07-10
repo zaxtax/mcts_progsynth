@@ -27,7 +27,7 @@ type Env  = HashMap String Val
 data Val
     = I Integer
     | L [Val]
-    | F (Val -> Val)
+    | F (Val -> State Fuel Val)
     | Error
 
 instance Eq Val where
@@ -50,22 +50,36 @@ data Term
     | Cons Term Term
   deriving (Eq, Show)
 
-app :: Val -> Val -> Val
-app (F f') x' = f' x'
-app _      _  = Error
+app :: State Fuel Val
+    -> State Fuel Val
+    -> State Fuel Val
+app f x = do
+  f1   <- f
+  x1   <- x
+  case f1 of
+   (F f2) -> f2 x1
+   _      -> return Error
 
 cons :: Val -> Val -> Val
 cons Error _      = Error -- Does cons care about its arguments?
 cons x     (L xs) = L (x:xs)
 cons _     _      = Error
 
-eval :: Term -> Env -> Val
-eval (Var  x)      env = maybe Error id (lookup x env)
-eval (Lam  x body) env = F (\ x' -> eval body (insert x x' env))
-eval (App  f x)    env = app (eval f env) (eval x env)
-eval (Lit  a)      _   = I a
-eval Nil           _   = L []
-eval (Cons x xs)   env = cons (eval x env) (eval xs env)
+eval :: Term -> Env -> Fuel -> Val
+eval e env fuel = evalState (go e env) fuel
+ where go :: Term -> Env -> State Fuel Val
+       go (Var  x)      env = sub . return $ maybe Error id (lookup x env)
+       go (Lam  x body) env = sub . return $ F (\ x' -> go body (insert x x' env))
+       go (App  f x)    env = sub $ app (go f env) (go x env)
+       go (Lit  a)      _   = sub $ return (I a)
+       go Nil           _   = sub $ return (L [])
+       go (Cons x xs)   env = sub $ cons <$> go x env <*> go xs env
+
+       sub :: State Fuel Val -> State Fuel Val
+       sub x = do modify (subtract 1)
+                  fuel <- get
+                  if fuel < 0 then return Error
+                  else x
 
 poor_bias, good_bias :: V.Vector Double
 
@@ -120,7 +134,7 @@ getPassingTerm o g = do
     Nothing -> getPassingTerm o g
  where go x = do
          (term, _) <- x
-         o (eval term empty)
+         o (eval term empty 1500)
          return term
 
 main :: IO ()
